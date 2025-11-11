@@ -30,8 +30,9 @@ This project implements and compares different approaches for Connected Componen
 
 ```
 ├── main.cu                     # Main program with CPU/GPU comparison
-├── kernel.cu                   # CUDA kernels implementation
+├── kernel.cu                   # CUDA kernels implementation  
 ├── kernel.cuh                  # Header file with function declarations
+├── modern_ccl_algorithm.cu     # Research-based Union-Find implementation
 ├── Makefile                    # Build configuration
 ├── comprehensive_test.sh       # Multi-scenario testing script
 ├── gpu_performance_analysis.sh # Performance scaling analysis
@@ -75,11 +76,17 @@ make clean && make
 - **Convergence**: Guaranteed correctness
 - **Time Complexity**: O(n²) worst case
 
-### GPU Algorithm  
-- **Method**: Block-based parallel label propagation
+### GPU Algorithm (Primary Implementation in kernel.cu)
+- **Method**: Block-based parallel label propagation with shared memory
 - **Optimization**: Shared memory usage for block-local processing
 - **Connectivity**: 4-connected neighborhood
 - **Trade-off**: Speed vs accuracy (typical in GPU CCL research)
+
+### Research-Based Implementation (modern_ccl_algorithm.cu)
+- **Method**: Union-Find with path compression (based on Allegretti et al. 2019)
+- **Source**: YACCLAB BUF (Block-based Union Find) algorithm
+- **Features**: Atomic operations, path compression, 8-connectivity support
+- **Purpose**: Educational reference showing research paper implementation
 
 ### Key GPU Optimizations:
 1. **Shared Memory**: Block-local processing reduces global memory access
