@@ -1,0 +1,25 @@
+# Compiled binaries
+connected_components
+*.o
+*.exe
+
+# Reference algorithms (too large for repo)
+reference_algorithms/
+
+# Backup files
+*.bak
+*~
+
+# IDE files
+.vscode/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+
+# CUDA compilation files
+*.ptx
+*.cubin
+*.fatbin
