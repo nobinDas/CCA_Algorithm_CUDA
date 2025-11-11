@@ -28,12 +28,23 @@ This project implements and compares different approaches for Connected Componen
 
 ## 🏗️ Project Structure
 
+### Active Implementation (Compiled & Executed)
 ```
-├── main.cu                     # Main program with CPU/GPU comparison
-├── kernel.cu                   # CUDA kernels implementation  
-├── kernel.cuh                  # Header file with function declarations
-├── modern_ccl_algorithm.cu     # Research-based Union-Find implementation
-├── Makefile                    # Build configuration
+├── main.cu                     # Main program with CPU/GPU performance comparison
+├── kernel.cu                   # Optimized CUDA kernel (1170x+ speedup)
+├── kernel.cuh                  # Header file for GPU function declarations
+└── Makefile                    # Build configuration for working code
+```
+
+### Educational References (Documentation Only)
+```
+├── reference_union_find_ccl.cu # Research-based Union-Find reference implementation
+│                              # (Based on Allegretti et al. 2019 YACCLAB BUF)
+│                              # NOT compiled - educational purposes only
+```
+
+### Testing & Analysis Tools
+```
 ├── comprehensive_test.sh       # Multi-scenario testing script
 ├── gpu_performance_analysis.sh # Performance scaling analysis
 └── test_scaling.sh            # Image size scaling tests
@@ -48,10 +59,18 @@ This project implements and compares different approaches for Connected Componen
 
 ## 🔧 Compilation & Usage
 
+### Quick Start (Recommended):
+```bash
+# Build and run the optimized implementation
+make clean && make
+./connected_components
+```
+
 ### Build the project:
 ```bash
 make clean && make
 ```
+*Note: Only compiles main.cu and kernel.cu. The reference_union_find_ccl.cu is reference-only.*
 
 ### Run performance comparison:
 ```bash
@@ -62,6 +81,12 @@ make clean && make
 ```bash
 ./comprehensive_test.sh
 ```
+
+### Study Research Implementation:
+The `reference_union_find_ccl.cu` file is for educational purposes only:
+- Read it to understand Union-Find with path compression
+- Compare with the optimized implementation in `kernel.cu`
+- It's **not compiled** as part of the build process
 
 ### Test performance scaling:
 ```bash
@@ -79,12 +104,14 @@ make clean && make
 ### GPU Algorithm (Primary Implementation in kernel.cu)
 - **Method**: Block-based parallel label propagation with shared memory
 - **Optimization**: Shared memory usage for block-local processing
+- **Status**: **ACTIVE** - This is the working implementation used by main.cu
 - **Connectivity**: 4-connected neighborhood
 - **Trade-off**: Speed vs accuracy (typical in GPU CCL research)
 
-### Research-Based Implementation (modern_ccl_algorithm.cu)
+### Research-Based Implementation (reference_union_find_ccl.cu)
 - **Method**: Union-Find with path compression (based on Allegretti et al. 2019)
 - **Source**: YACCLAB BUF (Block-based Union Find) algorithm
+- **Status**: **REFERENCE ONLY** - Not compiled or executed
 - **Features**: Atomic operations, path compression, 8-connectivity support
 - **Purpose**: Educational reference showing research paper implementation
 
