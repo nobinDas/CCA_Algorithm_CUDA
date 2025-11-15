@@ -101,14 +101,14 @@ void testImageSize(int width, int height, const char* size_label) {
     printf("Foreground density: ~40%%\n");
 
     // CPU Version
-    printf("\n🖥️  CPU Connected Components (Reference):\n");
+    printf("\n  CPU Connected Components (Reference):\n");
     clock_t start = clock();
     cpuConnectedComponents(h_img, h_labels_cpu, width, height);
     clock_t end = clock();
     double cpu_time = ((double)(end - start)) / CLOCKS_PER_SEC;
-    printf("   ⏱️  Time: %.4f seconds\n", cpu_time);
+    printf("    Time: %.4f seconds\n", cpu_time);
     int cpu_components = countComponents(h_labels_cpu, size);
-    printf("   🧮 Components: %d\n", cpu_components);
+    printf("    Components: %d\n", cpu_components);
 
     // GPU Setup and timing INCLUDING data transfers
     cudaMalloc(&d_img, size);
@@ -119,15 +119,30 @@ void testImageSize(int width, int height, const char* size_label) {
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
 
     // GPU Version (Optimized) - INCLUDING memory transfers
-    printf("\n🚀 GPU Connected Components (Optimized + Memory Transfers):\n");
+    printf("\n GPU Connected Components (Complete 3-Phase Algorithm + Memory Transfers):\n");
     
     cudaEvent_t gpu_start, gpu_stop;
     cudaEventCreate(&gpu_start);
     cudaEventCreate(&gpu_stop);
     
-    // Warm-up run (full pipeline)
+    // Configure kernels for three-phase algorithm
+    dim3 localGrid = grid;
+    dim3 localBlock = block;
+    
+    // Configure boundary merge kernel (same grid as local)
+    dim3 mergeGrid = localGrid;
+    dim3 mergeBlock = localBlock;
+    
+    // Configure compression kernel
+    int totalPixels = width * height;
+    dim3 compressGrid((totalPixels + 255) / 256);
+    dim3 compressBlock(256);
+    
+    // Warm-up run (complete three-phase pipeline)
     cudaMemcpy(d_img, h_img, size, cudaMemcpyHostToDevice);
-    optimized_ccl_kernel<<<grid, block>>>(d_img, d_labels, width, height);
+    optimized_ccl_kernel<<<localGrid, localBlock>>>(d_img, d_labels, width, height);
+    boundary_merge_kernel<<<mergeGrid, mergeBlock>>>(d_img, d_labels, width, height);
+    compress_labels_kernel<<<compressGrid, compressBlock>>>(d_labels, width, height);
     cudaMemcpy(h_labels_gpu, d_labels, size * sizeof(int), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
     
@@ -137,9 +152,11 @@ void testImageSize(int width, int height, const char* size_label) {
     
     for (int run = 0; run < num_runs; run++) {
         cudaEventRecord(gpu_start);
-        // INCLUDE ALL GPU WORK: transfer in + compute + transfer out
+        // COMPLETE THREE-PHASE GPU PIPELINE: transfer + local + boundary + compression + transfer
         cudaMemcpy(d_img, h_img, size, cudaMemcpyHostToDevice);
-        optimized_ccl_kernel<<<grid, block>>>(d_img, d_labels, width, height);
+        optimized_ccl_kernel<<<localGrid, localBlock>>>(d_img, d_labels, width, height);
+        boundary_merge_kernel<<<mergeGrid, mergeBlock>>>(d_img, d_labels, width, height);
+        compress_labels_kernel<<<compressGrid, compressBlock>>>(d_labels, width, height);
         cudaMemcpy(h_labels_gpu, d_labels, size * sizeof(int), cudaMemcpyDeviceToHost);
         cudaEventRecord(gpu_stop);
         cudaEventSynchronize(gpu_stop);
@@ -151,20 +168,20 @@ void testImageSize(int width, int height, const char* size_label) {
     
     float avg_gpu_time_ms = total_time_ms / num_runs;
     
-    printf("   ⏱️  Time (average of %d runs, including transfers): %.6f seconds (%.3f milliseconds)\n", 
+    printf("    Time (average of %d runs, including transfers): %.6f seconds (%.3f milliseconds)\n", 
            num_runs, avg_gpu_time_ms / 1000.0, avg_gpu_time_ms);
     int gpu_components = countComponents(h_labels_gpu, size);
-    printf("   🧮 Components: %d\n", gpu_components);
+    printf("    Components: %d\n", gpu_components);
 
     // Performance Analysis
     double speedup = cpu_time / (avg_gpu_time_ms/1000.0);
     double accuracy = 100.0 * (1.0 - abs(gpu_components - cpu_components) / (double)cpu_components);
     double throughput_mbps = (size * (sizeof(unsigned char) + sizeof(int))) / (avg_gpu_time_ms/1000.0) / 1048576.0;
     
-    printf("\n📊 Performance Results:\n");
-    printf("   🎯 Speedup: %.2fx\n", speedup);
-    printf("   ✅ Accuracy: %.1f%%\n", accuracy);
-    printf("   📈 Throughput: %.2f MB/s\n", throughput_mbps);
+    printf("\n Performance Results:\n");
+    printf("    Speedup: %.2fx\n", speedup);
+    printf("    Accuracy: %.1f%%\n", accuracy);
+    printf("    Throughput: %.2f MB/s\n", throughput_mbps);
 
     // Cleanup
     cudaEventDestroy(gpu_start);
@@ -177,9 +194,9 @@ void testImageSize(int width, int height, const char* size_label) {
 }
 
 int main() {
-    printf("🧪 === GPU Connected Component Labeling - Multi-Size Performance Analysis ===\n");
-    printf("Testing algorithm scalability across different image sizes\n");
-    printf("GPU Architecture: Optimized block-based CCL with shared memory\n\n");
+    printf(" === GPU Connected Component Labeling - Performance Analysis ===\n");
+    printf("Testing optimized CUDA implementation across multiple image sizes\n");
+    printf("GPU Algorithm: Block-based CCL with shared memory optimization\n\n");
 
     // Define test sizes
     ImageSize test_sizes[] = {
@@ -219,17 +236,29 @@ int main() {
         cudaMalloc(&d_img, size);
         cudaMalloc(&d_labels, size * sizeof(int));
         
-        dim3 block(16, 16);
-        dim3 grid((test_sizes[i].width + block.x - 1) / block.x, 
-                  (test_sizes[i].height + block.y - 1) / block.y);
+        // Configure all three phases for scaling test
+        dim3 localBlock(16, 16);
+        dim3 localGrid((test_sizes[i].width + localBlock.x - 1) / localBlock.x, 
+                      (test_sizes[i].height + localBlock.y - 1) / localBlock.y);
+        
+        // Boundary merge uses same grid as local
+        dim3 mergeGrid = localGrid;
+        dim3 mergeBlock = localBlock;
+        
+        // Compression phase
+        int totalPixels = test_sizes[i].width * test_sizes[i].height;
+        dim3 compressGrid((totalPixels + 255) / 256);
+        dim3 compressBlock(256);
         
         cudaEvent_t gpu_start, gpu_stop;
         cudaEventCreate(&gpu_start);
         cudaEventCreate(&gpu_stop);
         
-        // Warm-up (full pipeline)
+        // Warm-up (complete three-phase pipeline)
         cudaMemcpy(d_img, h_img, size, cudaMemcpyHostToDevice);
-        optimized_ccl_kernel<<<grid, block>>>(d_img, d_labels, test_sizes[i].width, test_sizes[i].height);
+        optimized_ccl_kernel<<<localGrid, localBlock>>>(d_img, d_labels, test_sizes[i].width, test_sizes[i].height);
+        boundary_merge_kernel<<<mergeGrid, mergeBlock>>>(d_img, d_labels, test_sizes[i].width, test_sizes[i].height);
+        compress_labels_kernel<<<compressGrid, compressBlock>>>(d_labels, test_sizes[i].width, test_sizes[i].height);
         cudaMemcpy(h_labels_gpu, d_labels, size * sizeof(int), cudaMemcpyDeviceToHost);
         cudaDeviceSynchronize();
         
@@ -239,9 +268,11 @@ int main() {
         
         for (int run = 0; run < summary_runs; run++) {
             cudaEventRecord(gpu_start);
-            // FULL GPU PIPELINE: transfer + compute + transfer
+            // COMPLETE THREE-PHASE GPU PIPELINE: transfer + local + boundary + compression + transfer
             cudaMemcpy(d_img, h_img, size, cudaMemcpyHostToDevice);
-            optimized_ccl_kernel<<<grid, block>>>(d_img, d_labels, test_sizes[i].width, test_sizes[i].height);
+            optimized_ccl_kernel<<<localGrid, localBlock>>>(d_img, d_labels, test_sizes[i].width, test_sizes[i].height);
+            boundary_merge_kernel<<<mergeGrid, mergeBlock>>>(d_img, d_labels, test_sizes[i].width, test_sizes[i].height);
+            compress_labels_kernel<<<compressGrid, compressBlock>>>(d_labels, test_sizes[i].width, test_sizes[i].height);
             cudaMemcpy(h_labels_gpu, d_labels, size * sizeof(int), cudaMemcpyDeviceToHost);
             cudaEventRecord(gpu_stop);
             cudaEventSynchronize(gpu_stop);
@@ -267,7 +298,7 @@ int main() {
     }
     
     // Summary Table
-    printf("\n📊 === REALISTIC SCALABILITY ANALYSIS (Including Memory Transfers) ===\n");
+    printf("\n === REALISTIC SCALABILITY ANALYSIS (Including Memory Transfers) ===\n");
     printf("┌─────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────┐\n");
     printf("│ Image Size  │   CPU Time   │   GPU Time   │   Speedup    │  Throughput  │   Pixels     │\n");
     printf("│             │     (s)      │    (ms)      │      (x)     │    (MB/s)    │              │\n");
@@ -280,21 +311,7 @@ int main() {
     }
     printf("└─────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────┘\n");
     
-    // Analysis
-    printf("\n🎯 === HONEST PERFORMANCE INSIGHTS ===\n");
-    
-    // Reality checks for measurement validity
-    if (gpu_times[num_sizes-1] < 0.001) {  // Less than 1 millisecond
-        printf("⚠️  WARNING: GPU times still very low - might need larger images\n");
-    }
-    
-    if (speedups[num_sizes-1] > 500) {  // More than 500x speedup
-        printf("⚠️  WARNING: Speedups still suspiciously high for CCL algorithm\n");
-    } else if (speedups[num_sizes-1] > 50) {
-        printf("✅ GOOD: Speedups in realistic range for optimized GPU CCL\n");
-    } else {
-        printf("✅ CONSERVATIVE: Speedups in expected range for CCL with transfers\n");
-    }
+
     
     printf("• Best Speedup: %.2fx (at %s resolution)\n", 
            speedups[0] > speedups[num_sizes-1] ? speedups[0] : speedups[num_sizes-1],
@@ -304,25 +321,18 @@ int main() {
            throughputs[0] > throughputs[num_sizes-1] ? test_sizes[0].label : test_sizes[num_sizes-1].label);
     
     // More realistic analysis
-    printf("\n🔍 === HONEST TIMING BREAKDOWN ===\n");
+    /*printf("\n === TIMING BREAKDOWN ===\n");
     for (int i = 0; i < num_sizes; i++) {
         printf("• %s: CPU=%.4fs, GPU=%.3fms (%.6fs) - includes data transfers\n", 
                test_sizes[i].label, cpu_times[i], gpu_times[i] * 1000.0, gpu_times[i]);
     }
     
-    printf("\n📝 === CHATGPT'S CONCERNS ADDRESSED ===\n");
-    printf("✅ Memory transfers: NOW INCLUDED in GPU timing\n");
-    printf("✅ CPU optimization: Using -O3 compiler flags\n");
-    printf("✅ Synchronization: Using cudaEventSynchronize()\n");
-    printf("✅ Multiple runs: Averaging 20-50 runs per test\n");
-    printf("✅ Same data: Both CPU and GPU process identical images\n");
-    
     if (speedups[num_sizes-1] > speedups[0]) {
-        printf("• Scaling Trend: ✅ Better performance at larger sizes (GPU-friendly)\n");
+        printf("• Scaling Trend: Better performance at larger sizes (GPU-friendly)\n");
     } else {
-        printf("• Scaling Trend: ⚠️  Better performance at smaller sizes (memory-bound)\n");
+        printf("• Scaling Trend: Better performance at smaller sizes (memory-bound)\n");
     }
     
-    printf("\n🎉 Multi-size performance analysis complete!\n");
+    printf("\n Multi-size performance analysis complete!\n");*/
     return 0;
 }

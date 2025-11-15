@@ -1,11 +1,33 @@
-// Clean CUDA Connected Component Labeling Implementation
-// Contains only the optimized algorithm currently used in main.cu
+// Complete CUDA Connected Component Labeling Implementation
+// Three-phase algorithm: Local Labeling + Boundary Merge + Label Compression
 
 #include <stdio.h>
 #include "kernel.cuh"
 
 __device__ int getIndex(int x, int y, int width) {
     return y * width + x;
+}
+
+// Union-find operations for boundary merge phase
+__device__ int findRoot(int *labels, int idx) {
+    int root = idx;
+    while (labels[root] != root && labels[root] != -1) {
+        root = labels[root];
+    }
+    return root;
+}
+
+__device__ void merge(int *labels, int a, int b) {
+    int rootA = findRoot(labels, a);
+    int rootB = findRoot(labels, b);
+    if (rootA != rootB && rootA != -1 && rootB != -1) {
+        // Union by making smaller root point to larger root
+        if (rootA < rootB) {
+            atomicMin(&labels[rootB], rootA);
+        } else {
+            atomicMin(&labels[rootA], rootB);
+        }
+    }
 }
 
 // High-performance block-based CCL kernel
@@ -61,5 +83,49 @@ __global__ void optimized_ccl_kernel(unsigned char *img, int *labels, int width,
     // Write back to global memory
     if (row < height && col < width) {
         labels[idx] = s_labels[tid];
+    }
+}
+
+// Boundary Merge Implementation - merges components across block boundaries
+__global__ void boundary_merge_kernel(unsigned char *img, int *labels, int width, int height) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (row >= height || col >= width) return;
+    
+    int idx = row * width + col;
+    
+    // Only process foreground pixels at block boundaries
+    if (img[idx] == 1) {
+        int blockDimX = 16; // Block size
+        int blockDimY = 16;
+        
+        // Check if pixel is at vertical block boundary (merge with left neighbor)
+        if (col % blockDimX == 0 && col > 0) {
+            int leftIdx = idx - 1;
+            if (img[leftIdx] == 1 && labels[leftIdx] != labels[idx]) {
+                merge(labels, leftIdx, idx);
+            }
+        }
+        
+        // Check if pixel is at horizontal block boundary (merge with upper neighbor) 
+        if (row % blockDimY == 0 && row > 0) {
+            int upIdx = idx - width;
+            if (img[upIdx] == 1 && labels[upIdx] != labels[idx]) {
+                merge(labels, upIdx, idx);
+            }
+        }
+    }
+}
+
+// Label Compression Implementation - resolves all label equivalences
+__global__ void compress_labels_kernel(int *labels, int width, int height) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int totalPixels = width * height;
+    
+    if (idx < totalPixels) {
+        if (labels[idx] != -1) {  // Only process foreground pixels
+            labels[idx] = findRoot(labels, idx);
+        }
     }
 }
